@@ -37,13 +37,27 @@
             left: 20px;
             z-index: 50;
             color: #475569;
-            font-size: 1.5rem;
+            font-size: 1.2rem;
             cursor: pointer;
             opacity: 0.3;
             transition: opacity 0.3s;
             display: none;
         }
         .back-button:hover { opacity: 1; }
+
+        .mute-button {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 50;
+            color: #475569;
+            font-size: 1.2rem;
+            cursor: pointer;
+            opacity: 0.3;
+            transition: opacity 0.3s;
+            display: none;
+        }
+        .mute-button:hover { opacity: 1; }
 
         /* --- MENU GŁÓWNE --- */
         #main-menu {
@@ -199,8 +213,7 @@
 </head>
 <body>
 
-    <!-- NAPRAWIONY FILTR SVG: Prosty, czysty Gooey Effect bez operatora atop, 
-         który powodował wcześniej ostre i zepsute tekstury wewnątrz cieczy -->
+    <!-- Zoptymalizowany filtr SVG (Lava Lamp) -->
     <svg style="position: absolute; width: 0; height: 0; pointer-events: none;">
         <defs>
             <filter id="goo">
@@ -219,12 +232,15 @@
     <!-- Wspólny Canvas -->
     <canvas id="magicCanvas"></canvas>
 
-    <!-- Przycisk powrotu -->
+    <!-- Przyciski nawigacyjne (Menu i Wyciszenie) -->
     <div id="btn-back" class="back-button" onclick="App.showMenu()">&#8592; Menu</div>
+    <div id="btn-mute" class="mute-button" onclick="AudioManager.toggleMute()">Dźwięk: WŁ.</div>
 
     <!-- MENU GŁÓWNE -->
     <div id="main-menu">
-        <h1 class="text-3xl font-light text-slate-500 mb-12 tracking-widest uppercase">Wybierz sen</h1>
+        <h1 class="text-2xl md:text-3xl font-light text-slate-500 mb-2 tracking-widest uppercase">Wybierz sen</h1>
+        <p class="text-sm text-slate-700 mb-10 tracking-wide font-light">(Włącz dźwięk w urządzeniu)</p>
+        
         <button class="menu-btn" onclick="App.startScene('jar')">Magiczny Słoiczek</button>
         <button class="menu-btn" onclick="App.startScene('matrix')">Senny Matrix</button>
         <button class="menu-btn" onclick="App.startScene('tunnel')">Senny Tunel</button>
@@ -247,6 +263,140 @@
     </div>
 
     <script>
+        // ==========================================
+        // 0. GENERATOR DŹWIĘKU (WEB AUDIO API)
+        // ==========================================
+        const AudioManager = {
+            ctx: null,
+            masterFilter: null,
+            masterGain: null,
+            activeNodes: [], 
+            activeGains: [], 
+            isMuted: false,
+
+            init: function() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    
+                    this.masterGain = this.ctx.createGain();
+                    this.masterGain.gain.value = this.isMuted ? 0 : 1;
+                    this.masterGain.connect(this.ctx.destination);
+
+                    this.masterFilter = this.ctx.createBiquadFilter();
+                    this.masterFilter.type = 'lowpass';
+                    this.masterFilter.frequency.value = 800; 
+                    this.masterFilter.connect(this.masterGain);
+                }
+                
+                if (this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            },
+
+            toggleMute: function() {
+                this.isMuted = !this.isMuted;
+                const btn = document.getElementById('btn-mute');
+                btn.innerHTML = this.isMuted ? 'Dźwięk: WYŁ.' : 'Dźwięk: WŁ.';
+                btn.style.opacity = this.isMuted ? '0.6' : ''; 
+
+                if (this.masterGain && this.ctx) {
+                    const now = this.ctx.currentTime;
+                    this.masterGain.gain.cancelScheduledValues(now);
+                    this.masterGain.gain.setValueAtTime(this.masterGain.gain.value, now);
+                    this.masterGain.gain.linearRampToValueAtTime(this.isMuted ? 0 : 1, now + 0.5);
+                }
+            },
+
+            stopAll: function() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                
+                this.activeGains.forEach(gainNode => {
+                    gainNode.gain.cancelScheduledValues(now);
+                    gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+                    gainNode.gain.linearRampToValueAtTime(0, now + 1.0); 
+                });
+
+                const nodesToStop = [...this.activeNodes];
+                this.activeNodes = [];
+                this.activeGains = [];
+
+                setTimeout(() => {
+                    nodesToStop.forEach(n => {
+                        try { if (n.stop) n.stop(); } catch(e) {}
+                        try { n.disconnect(); } catch(e) {}
+                    });
+                }, 1100);
+            },
+
+            playNoise: function(type, volume = 0.5) {
+                const bufferSize = this.ctx.sampleRate * 2; 
+                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                let lastOut = 0;
+                
+                for (let i = 0; i < bufferSize; i++) {
+                    const white = Math.random() * 2 - 1;
+                    if (type === 'brown') {
+                        data[i] = (lastOut + (0.02 * white)) / 1.02;
+                        lastOut = data[i];
+                        data[i] *= 3.5; 
+                    } else if (type === 'pink') {
+                        data[i] = white * 0.5; 
+                    }
+                }
+
+                const noise = this.ctx.createBufferSource();
+                noise.buffer = buffer;
+                noise.loop = true;
+
+                const filter = this.ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.value = type === 'brown' ? 250 : 600;
+
+                const gain = this.ctx.createGain();
+                gain.gain.setValueAtTime(0, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(volume, this.ctx.currentTime + 3);
+
+                noise.connect(filter);
+                filter.connect(gain);
+                gain.connect(this.masterFilter);
+
+                noise.start();
+                this.activeNodes.push(noise, filter, gain);
+                this.activeGains.push(gain);
+            },
+
+            playDrone: function(freq, pulseFreq, volume = 0.5) {
+                const osc = this.ctx.createOscillator();
+                osc.type = 'sine'; 
+                osc.frequency.value = freq;
+                
+                const gain = this.ctx.createGain();
+                gain.gain.setValueAtTime(0, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(volume, this.ctx.currentTime + 3);
+                
+                const lfo = this.ctx.createOscillator();
+                lfo.type = 'sine';
+                lfo.frequency.value = pulseFreq; 
+                
+                const lfoGain = this.ctx.createGain();
+                lfoGain.gain.value = volume * 0.6; 
+                
+                lfo.connect(lfoGain);
+                lfoGain.connect(gain.gain);
+                
+                osc.connect(gain);
+                gain.connect(this.masterFilter);
+                
+                osc.start();
+                lfo.start();
+                
+                this.activeNodes.push(osc, lfo, lfoGain, gain);
+                this.activeGains.push(gain);
+            }
+        };
+
         // ==========================================
         // 1. KONTROLER GŁÓWNY APLIKACJI (CORE)
         // ==========================================
@@ -274,13 +424,20 @@
                 this.requestWakeLock();
                 this.toggleFullScreen();
 
+                AudioManager.init();
+
                 document.getElementById('main-menu').style.opacity = '0';
                 setTimeout(() => {
                     document.getElementById('main-menu').style.display = 'none';
                     document.getElementById('btn-back').style.display = 'block';
+                    document.getElementById('btn-mute').style.display = 'block';
                 }, 1000);
 
-                if (this.currentScene) this.currentScene.stop();
+                if (this.currentScene) {
+                    this.currentScene.stop();
+                    AudioManager.stopAll(); 
+                }
+                
                 this.currentScene = Scenes[sceneName];
                 
                 setTimeout(() => {
@@ -292,9 +449,13 @@
                 if (this.currentScene) this.currentScene.stop();
                 this.currentScene = null;
                 
+                AudioManager.stopAll();
+                
                 this.ctx.clearRect(0, 0, this.width, this.height);
 
                 document.getElementById('btn-back').style.display = 'none';
+                document.getElementById('btn-mute').style.display = 'none';
+                
                 const menu = document.getElementById('main-menu');
                 menu.style.display = 'flex';
                 setTimeout(() => menu.style.opacity = '1', 50);
@@ -349,6 +510,9 @@
             zzzEl: document.getElementById('zzz'),
 
             start: function() {
+                AudioManager.playNoise('pink', 0.4); 
+                AudioManager.playDrone(120, 0.1, 0.2);
+
                 this.domElement.style.display = 'flex';
                 this.fillLevel = 0;
                 this.fillEl.style.height = '0%';
@@ -470,17 +634,28 @@
             }
         };
 
-        // --- SCENA 2: SENNY MATRIX ---
+        // --- SCENA 2: SENNY MATRIX (ROZSZERZONY ZESTAW SYMBOLI) ---
         Scenes.matrix = {
             drops: [],
             fontSize: 24,
-            chars: "Zzz...01".split(""), 
+            // Rozszerzony alfabet: Katakana, Greka, Matematyka, ASCII i Zzz
+            chars: "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789αβγδεζηθικλμνξοπρστυφχψωΣΔΘΛΞΠΦΨΩ∞∫√≠≈≤≥±×÷∂∆∏∑Zzz...".split(""), 
+            ribbonLength: 35, 
+            columns: 0,
             
             start: function() {
-                const columns = Math.floor(App.width / this.fontSize) + 1;
+                AudioManager.playNoise('brown', 0.8);
+
+                this.columns = Math.floor(App.width / this.fontSize) + 1;
                 this.drops = [];
-                for(let x = 0; x < columns; x++) {
-                    this.drops[x] = Math.random() * -100;
+                for(let x = 0; x < this.columns; x++) {
+                    this.drops[x] = {
+                        y: Math.random() * -100, 
+                        speed: 0.10 + Math.random() * 0.08, 
+                        symbols: Array.from({length: this.ribbonLength}, () => 
+                            this.chars[Math.floor(Math.random() * this.chars.length)]
+                        )
+                    };
                 }
             },
 
@@ -489,20 +664,55 @@
             },
 
             render: function(ctx, w, h) {
-                ctx.fillStyle = "rgba(4, 8, 20, 0.05)";
+                ctx.fillStyle = "#040814";
                 ctx.fillRect(0, 0, w, h);
 
-                ctx.fillStyle = "rgba(56, 189, 248, 0.3)"; 
                 ctx.font = `300 ${this.fontSize}px monospace`;
 
                 for(let i = 0; i < this.drops.length; i++) {
-                    const text = this.chars[Math.floor(Math.random() * this.chars.length)];
-                    ctx.fillText(text, i * this.fontSize, this.drops[i] * this.fontSize);
+                    let drop = this.drops[i];
+                    let headY = Math.floor(drop.y);
 
-                    if(this.drops[i] * this.fontSize > h && Math.random() > 0.99) {
-                        this.drops[i] = 0;
+                    for (let j = 0; j < this.ribbonLength; j++) {
+                        let alpha = (1 - j / this.ribbonLength) * 0.45;
+                        if (alpha <= 0) continue;
+
+                        let charY = (headY - j) * this.fontSize;
+                        
+                        if (charY < -this.fontSize || charY > h + this.fontSize) continue;
+
+                        let symbol = drop.symbols[j];
+
+                        if (j === 0) {
+                            // Głowa wstążki zmienia się rzadko by nie drażnić oczu
+                            if (Math.random() > 0.95) { 
+                                symbol = this.chars[Math.floor(Math.random() * this.chars.length)];
+                                drop.symbols[0] = symbol;
+                            }
+                            ctx.fillStyle = `rgba(125, 211, 252, 0.95)`;
+                        } else {
+                            ctx.fillStyle = `rgba(56, 189, 248, ${alpha})`;
+                        }
+
+                        ctx.fillText(symbol, i * this.fontSize, charY);
                     }
-                    this.drops[i] += 0.15;
+
+                    let oldHeadY = Math.floor(drop.y);
+                    drop.y += drop.speed;
+                    let newHeadY = Math.floor(drop.y);
+
+                    if (newHeadY > oldHeadY) {
+                        // Przesuwamy znaki w dół, dodając nowy na szczyt (fizyczny ribbon)
+                        drop.symbols.unshift(this.chars[Math.floor(Math.random() * this.chars.length)]);
+                        if (drop.symbols.length > this.ribbonLength) {
+                            drop.symbols.pop();
+                        }
+                    }
+
+                    if((drop.y - this.ribbonLength) * this.fontSize > h) {
+                        drop.y = -5;
+                        drop.speed = 0.10 + Math.random() * 0.08;
+                    }
                 }
             }
         };
@@ -514,6 +724,9 @@
             maxDepth: 3000,
 
             start: function() {
+                AudioManager.playNoise('brown', 0.3); 
+                AudioManager.playDrone(75, 0.06, 0.6); 
+
                 this.particles = [];
                 for(let i = 0; i < 200; i++) {
                     this.particles.push({
@@ -611,28 +824,26 @@
             }
         };
 
-        // --- SCENA 4: LAVA LAMP (Czysty, organiczny flow!) ---
+        // --- SCENA 4: LAVA LAMP ---
         Scenes.honey = {
             blobs: [],
             
             start: function() {
-                // Odpalamy prosty, zoptymalizowany filtr Gooey
+                AudioManager.playNoise('brown', 0.6); 
+                AudioManager.playDrone(60, 0.08, 0.5);
+
                 App.canvas.style.filter = 'url(#goo)';
                 document.getElementById('honey-bg').style.opacity = '1';
                 
                 this.blobs = [];
-                // Gęstość kropli - im szerszy ekran, tym więcej kulek lawy
                 const numBlobs = Math.floor(App.width / 40); 
                 
                 for(let i = 0; i < numBlobs; i++) {
                     this.blobs.push({
                         x: Math.random() * App.width,
-                        y: Math.random() * App.height, // Zaczynają w całej przestrzeni
-                        // Różne, bardzo miękkie rozmiary
+                        y: Math.random() * App.height,
                         radius: Math.random() * 50 + 30, 
-                        // Kierunek: część płynie w dół, część w górę. BARDZO powoli.
                         vy: (Math.random() * 0.2 + 0.05) * (Math.random() > 0.5 ? 1 : -1), 
-                        // Mikro-drgania na boki dla złamania perfekcyjnego pionu
                         vx: (Math.random() - 0.5) * 0.05 
                     });
                 }
@@ -645,46 +856,34 @@
             },
 
             render: function(ctx, w, h) {
-                // Must be completely clear for the Goo filter to blend properly against background
                 ctx.clearRect(0, 0, w, h);
 
-                // --- FIZYKA LAWY ---
                 this.blobs.forEach(b => {
                     b.y += b.vy;
                     b.x += b.vx;
 
-                    // Leniwe odbijanie się, gdy kulka wyjdzie za daleko (brak przeskakiwania!)
-                    // Sufit:
                     if (b.y < -100 && b.vy < 0) b.vy *= -1; 
-                    // Dno:
                     if (b.y > h + 100 && b.vy > 0) b.vy *= -1; 
                     
-                    // Łagodne zapętlanie na bokach ekranu (gdy odpłynie za mocno w prawo/lewo)
                     if (b.x < -100) b.x = w + 100;
                     if (b.x > w + 100) b.x = -100;
                 });
 
-                // --- GLOBALNY GRADIENT DLA CAŁEJ MASY ---
-                // Dzięki temu "góra" kałuży, strugi i "dół" kałuży po zblendowaniu 
-                // przez filtr ułożą się w świetne światło 3D bez jakichkolwiek artefaktów.
                 const grad = ctx.createLinearGradient(0, 0, 0, h);
-                grad.addColorStop(0, '#fcd34d'); // Rozgrzany, jasny żółty u góry (jak przy lampce)
-                grad.addColorStop(0.5, '#ea580c'); // Nasycony pomarańczowy wosk w locie
-                grad.addColorStop(1, '#7c2d12'); // Stygnący, ciemny brąz na dnie
+                grad.addColorStop(0, '#fcd34d'); 
+                grad.addColorStop(0.5, '#ea580c'); 
+                grad.addColorStop(1, '#7c2d12'); 
                 
                 ctx.fillStyle = grad;
 
-                // 1. Sufit (Kałuża na górze, z której kapią i w którą wnikają kule)
                 ctx.beginPath();
                 ctx.rect(-50, -50, w + 100, 90);
                 ctx.fill();
 
-                // 2. Dno (Basen wosku na dole)
                 ctx.beginPath();
                 ctx.rect(-50, h - 50, w + 100, 100);
                 ctx.fill();
 
-                // 3. Swobodne Kule Lawy (Filtr Goo zrobi z nich płynne "rozrywanie się" i "stapanie")
                 this.blobs.forEach(b => {
                     ctx.beginPath();
                     ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
