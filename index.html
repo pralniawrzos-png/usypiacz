@@ -1,13 +1,417 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>barwy-muzyki</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Usypiacz - Magiczny Słoiczek</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #040814; 
+            color: #475569;
+            overflow: hidden;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* Monotonne pulsowanie tła (oddech) pozostaje w CSS dla wydajności */
+        @keyframes breathe {
+            0% { transform: scale(0.8); opacity: 0.05; }
+            50% { transform: scale(1.2); opacity: 0.15; }
+            100% { transform: scale(0.8); opacity: 0.05; }
+        }
+
+        .breathing-glow {
+            position: absolute;
+            width: 80vw;
+            height: 80vw;
+            max-width: 500px;
+            max-height: 500px;
+            background: radial-gradient(circle, rgba(30,58,138,0.8) 0%, rgba(4,8,20,0) 70%);
+            border-radius: 50%;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            animation: breathe 10s infinite ease-in-out;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        /* Elementy słoiczka w HTML ułatwiają stylowanie */
+        .jar-wrapper {
+            position: relative;
+            z-index: 10;
+            margin-top: 3rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .jar-container {
+            position: relative;
+            width: 180px;
+            height: 240px;
+            border: 6px solid #1e293b;
+            border-top: 4px solid #1e293b;
+            border-radius: 20px 20px 60px 60px; 
+            box-shadow: 0 0 40px rgba(30, 58, 138, 0.1);
+            overflow: hidden;
+            background-color: rgba(15, 23, 42, 0.4);
+        }
+
+        .jar-lid {
+            width: 140px;
+            height: 15px;
+            background-color: #334155;
+            border-radius: 10px;
+            margin-bottom: 5px;
+        }
+
+        .jar-fill {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 0%; 
+            background: linear-gradient(180deg, rgba(56, 189, 248, 0.5) 0%, rgba(30, 58, 138, 0.9) 100%);
+            transition: height 1s ease-out;
+            box-shadow: 0 -10px 20px rgba(56, 189, 248, 0.2);
+        }
+
+        .jar-fill::before {
+            content: '';
+            position: absolute;
+            top: -5px;
+            left: -50%;
+            width: 200%;
+            height: 10px;
+            background: rgba(125, 211, 252, 0.3);
+            border-radius: 50%;
+            animation: wave 6s infinite linear;
+        }
+
+        @keyframes wave {
+            0% { transform: translateX(0) scaleY(1); }
+            50% { transform: translateX(-25%) scaleY(1.5); }
+            100% { transform: translateX(0) scaleY(1); }
+        }
+
+        /* Animacja usypiającego Zzz */
+        @keyframes pulseZzz {
+            0%, 100% { transform: scale(0.9) rotate(15deg); opacity: 0.1; }
+            50% { transform: scale(1.1) rotate(15deg); opacity: 0.5; }
+        }
+
+        .zzz-text {
+            position: absolute;
+            top: 25px;
+            right: -60px;
+            font-size: 2.5rem;
+            color: #94a3b8;
+            font-weight: 300;
+            letter-spacing: 2px;
+            animation: pulseZzz 6s infinite ease-in-out;
+            z-index: 20;
+            pointer-events: none;
+            text-shadow: 0 0 15px rgba(148, 163, 184, 0.4);
+            opacity: 0; /* Ukryte przed rozpoczęciem */
+            transition: opacity 3s ease-in;
+        }
+
+        @media (max-width: 400px) {
+            .zzz-text {
+                right: -45px;
+                font-size: 2rem;
+            }
+        }
+
+        .sleepy-face {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            display: flex;
+            gap: 20px;
+            z-index: 20;
+            opacity: 0.2;
+            transition: opacity 2s;
+        }
+        
+        .eye {
+            width: 24px;
+            height: 12px;
+            border-bottom: 4px solid #94a3b8;
+            border-radius: 0 0 24px 24px;
+        }
+
+        /* Canvas dla gwiazdek i opadającego pyłu */
+        #magicCanvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 15; /* Nad tłem, nad tylną ścianką słoika */
+            pointer-events: none; /* Pozwala klikać przez canvas */
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center relative cursor-pointer" onclick="initApp()">
+
+    <!-- Tło -->
+    <div class="breathing-glow"></div>
+    
+    <!-- Płótno na cząsteczki i gwiazdy -->
+    <canvas id="magicCanvas"></canvas>
+
+    <!-- Słoiczek -->
+    <div class="jar-wrapper">
+        <div class="zzz-text" id="zzz">Zzz</div>
+        <div class="jar-lid"></div>
+        <div class="jar-container" id="jar">
+            <div class="jar-fill" id="jar-fill"></div>
+            <div class="sleepy-face" id="face">
+                <div class="eye"></div>
+                <div class="eye"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Napis startowy -->
+    <div id="text-container" class="absolute bottom-16 z-30 text-slate-500 font-light tracking-widest text-lg md:text-xl text-center transition-opacity duration-1000 w-full">
+        Dotknij ekranu, aby rozpocząć...
+    </div>
+
+    <script>
+        // --- KONFIGURACJA CANVAS ---
+        const canvas = document.getElementById('magicCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let width = canvas.width = window.innerWidth;
+        let height = canvas.height = window.innerHeight;
+
+        window.addEventListener('resize', () => {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        });
+
+        // --- STAN APLIKACJI ---
+        let isInitialized = false;
+        let fillLevel = 0; // 0 do 100
+        let wakeLock = null;
+        
+        const jarEl = document.getElementById('jar');
+        const fillEl = document.getElementById('jar-fill');
+        const faceEl = document.getElementById('face');
+
+        // --- OBIEKTY (CZĄSTECZKI I GWIAZDY) ---
+        const stars = [];
+        const particles = [];
+
+        // Inicjalizacja gwiazd
+        for (let i = 0; i < 40; i++) {
+            stars.push({
+                x: Math.random() * width,
+                y: Math.random() * height,
+                radius: Math.random() * 1.5 + 0.5,
+                alpha: Math.random() * 0.5,
+                alphaChange: (Math.random() * 0.005) + 0.001
+            });
+        }
+
+        // --- GŁÓWNA PĘTLA ANIMACJI CANVAS ---
+        function animate() {
+            ctx.clearRect(0, 0, width, height);
+
+            // 1. Rysowanie migoczących gwiazd
+            stars.forEach(star => {
+                star.alpha += star.alphaChange;
+                if (star.alpha <= 0.05 || star.alpha >= 0.6) {
+                    star.alphaChange *= -1; // Odwróć kierunek migotania
+                }
+                
+                ctx.beginPath();
+                ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, 255, 255, ${star.alpha})`;
+                ctx.fill();
+            });
+
+            // 2. Obsługa spadających drobinek (tylko jeśli aplikacja ruszyła)
+            if (isInitialized) {
+                // Pobieramy aktualną pozycję słoiczka na ekranie
+                const jarRect = jarEl.getBoundingClientRect();
+                
+                // Obliczamy fizycznie, gdzie jest powierzchnia płynu w słoiczku
+                // Odejmujemy grubość ramek (border 6px z góry i dołu to ok 12px wewnątrz)
+                const innerHeight = jarRect.height - 12; 
+                const fillHeightPx = (fillLevel / 100) * innerHeight;
+                // surfaceY uwzględnia dolną ramkę słoika (-6px) i wypukłość fali płynu (-5px)
+                const surfaceY = jarRect.bottom - 6 - fillHeightPx - 5; 
+
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    let p = particles[i];
+                    
+                    // Czy cząsteczka jest wewnątrz słoika?
+                    const isInsideGlass = p.y > jarRect.top;
+                    
+                    if (isInsideGlass) {
+                        // Magiczna fizyka w słoiku: spowolnienie (jak wpadnięcie w gęstszy, senny gaz)
+                        const targetSpeedY = 0.25; // Znacznie wolniejsze opadanie wewnątrz
+                        p.speedY += (targetSpeedY - p.speedY) * 0.06; // Płynne hamowanie
+                        
+                        // "Noise" - zmniejszona siła, aby zapobiec uciekaniu
+                        p.x += Math.sin(p.y * 0.08 + p.noiseSeed) * 0.15; 
+                        p.x += (Math.random() - 0.5) * 0.1; // Delikatniejsze mikro drgania
+                        
+                        // Twardy limit (clamping) - drobinki nie mogą przeniknąć przez ścianki słoika!
+                        const padding = 15; // margines wewnątrz słoika
+                        if (p.x < jarRect.left + padding) p.x = jarRect.left + padding;
+                        if (p.x > jarRect.right - padding) p.x = jarRect.right - padding;
+                    }
+
+                    // Fizyka spadania
+                    p.y += p.speedY;
+                    
+                    // Zmiana 1: Zmniejszamy bazowy stretch (mniej agresywnie)
+                    const targetStretch = isInsideGlass ? 2.5 : 1; 
+                    p.stretch += (targetStretch - p.stretch) * 0.08; 
+
+                    // Zmiana 2: CONSTANS POWIERZCHNI (stała masa/powierzchnia kropelki)
+                    // Zamiast tylko powiększać promień Y, zwężamy promień X proporcjonalnie. 
+                    // Użycie pierwiastka kwadratowego gwarantuje, że pole rx * ry jest równe początkowemu r^2.
+                    const stretchFactor = Math.sqrt(p.stretch);
+                    const rx = p.radius / stretchFactor;
+                    const ry = p.radius * stretchFactor;
+                    
+                    // Zmiana 3: Delikatne przygaszenie za grubym szkłem
+                    const targetAlpha = isInsideGlass ? 0.4 : 0.8;
+                    p.alpha += (targetAlpha - p.alpha) * 0.08;
+
+                    // Rysowanie drobinki z nowymi proporcjami
+                    ctx.beginPath();
+                    ctx.ellipse(p.x, p.y, rx, ry, 0, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(125, 211, 252, ${p.alpha})`;
+                    
+                    // Poświata za szkłem - bardziej rozproszona i powiązana z kanałem alpha
+                    if (isInsideGlass) {
+                        ctx.shadowBlur = 12;
+                        ctx.shadowColor = `rgba(56, 189, 248, 0.5)`; // Miękkie światło za szkłem
+                    } else {
+                        ctx.shadowBlur = 15;
+                        ctx.shadowColor = '#38bdf8'; // Ostre światło w powietrzu
+                    }
+                    
+                    ctx.fill();
+                    ctx.shadowBlur = 0; // Reset cienia dla innych elementów
+
+                    // Sprawdzanie kolizji: Jeśli cząsteczka dotrze do poziomu cieczy w słoiku
+                    // Zabezpieczenie: bierzemy pod uwagę tylko te, które wpadają przez otwór wieczka
+                    const isInsideJarX = p.x > jarRect.left + 20 && p.x < jarRect.right - 20;
+
+                    if (p.y >= surfaceY && isInsideJarX) {
+                        // Cząsteczka wpada do płynu!
+                        particles.splice(i, 1);
+                        
+                        // Zwiększamy poziom napełnienia (bardzo powolutku)
+                        if (fillLevel < 95) {
+                            fillLevel += 0.2; // Każda drobinka to 0.2%
+                            fillEl.style.height = `${fillLevel}%`;
+                            
+                            // Zanurzanie buźki
+                            if (fillLevel > 50) faceEl.style.opacity = '0.4';
+                            if (fillLevel > 80) faceEl.style.opacity = '0.6';
+                        }
+                    } else if (p.y > height) {
+                        // Jeśli ominęła słoik i spadła za ekran, usuwamy z pamięci
+                        particles.splice(i, 1);
+                    }
+                }
+            }
+
+            requestAnimationFrame(animate);
+        }
+
+        // Funkcja generująca nową drobinkę
+        function spawnParticle() {
+            if (!isInitialized) return;
+
+            const jarRect = jarEl.getBoundingClientRect();
+            // Celujemy tylko w światło otwartego wieczka (zwężony margines z lewej i prawej)
+            const margin = 25; 
+            const startX = jarRect.left + margin + (Math.random() * (jarRect.width - margin * 2));
+            
+            particles.push({
+                x: startX,
+                y: -10, // Startuje tuż nad górną krawędzią ekranu
+                radius: Math.random() * 2 + 1.5,
+                speedY: Math.random() * 0.5 + 0.8, // Bardzo powolne opadanie
+                alpha: 0.8,
+                stretch: 1, // Nowy parametr do płynnej animacji refrakcji
+                noiseSeed: Math.random() * Math.PI * 2 // Seed do unikalnego tańca w słoiku dla każdej drobinki
+            });
+
+            // Losowy czas do następnej drobinki (między 600ms a 1500ms)
+            setTimeout(spawnParticle, Math.random() * 900 + 600);
+        }
+
+        // --- FUNKCJE SYSTEMOWE (WAKE LOCK / FULLSCREEN) ---
+        async function requestWakeLock() {
+            if ('wakeLock' in navigator) {
+                try {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    document.addEventListener('visibilitychange', async () => {
+                        if (wakeLock !== null && document.visibilityState === 'visible') {
+                            try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+                        }
+                    });
+                } catch (err) {
+                    console.log(`Brak uprawnień Wake Lock: ${err.message}`);
+                }
+            }
+        }
+
+        function toggleFullScreen() {
+            if (!document.fullscreenElement) {
+                try {
+                    let p = null;
+                    if (document.documentElement.requestFullscreen) p = document.documentElement.requestFullscreen();
+                    else if (document.documentElement.webkitRequestFullscreen) p = document.documentElement.webkitRequestFullscreen();
+                    if (p) p.catch(err => console.log(err.message));
+                } catch (err) {}
+            }
+        }
+
+        // --- START APLIKACJI ---
+        function initApp() {
+            if (!isInitialized) {
+                isInitialized = true;
+                
+                // Animacja tekstu
+                const textEl = document.getElementById('text-container');
+                textEl.innerHTML = "Ciii... śpij...";
+                textEl.style.opacity = '0.3';
+                setTimeout(() => textEl.style.opacity = '0', 4000);
+
+                // Pokaż pulsujące Zzz po 2 sekundach od startu
+                setTimeout(() => {
+                    document.getElementById('zzz').style.opacity = '0.5';
+                }, 2000);
+
+                toggleFullScreen();
+                requestWakeLock();
+                
+                // Rozpoczęcie generowania cząsteczek
+                spawnParticle();
+            }
+        }
+
+        // Uruchomienie pętli animacji od razu (dla tła)
+        animate();
+    </script>
+</body>
 </html>
