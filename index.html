@@ -241,11 +241,11 @@
         <h1 class="text-2xl md:text-3xl font-light text-slate-500 mb-2 tracking-widest uppercase">Wybierz sen</h1>
         <p class="text-sm text-slate-700 mb-10 tracking-wide font-light">(Włącz dźwięk w urządzeniu)</p>
         
-        <button class="menu-btn" onclick="App.startScene('jar')">Magiczny Słoiczek</button>
-        <button class="menu-btn" onclick="App.startScene('matrix')">Senny Matrix</button>
-        <button class="menu-btn" onclick="App.startScene('tunnel')">Senny Tunel</button>
-        <button class="menu-btn" onclick="App.startScene('honey')">Senna Lawa</button>
-        <button class="menu-btn" onclick="App.startScene('electro')">Senna Iskra</button>
+        <button class="menu-btn" onclick="App.startScene('jar')">Słoiczek</button>
+        <button class="menu-btn" onclick="App.startScene('matrix')">Matrix</button>
+        <button class="menu-btn" onclick="App.startScene('tunnel')">Tunel</button>
+        <button class="menu-btn" onclick="App.startScene('honey')">Lawa</button>
+        <button class="menu-btn" onclick="App.startScene('electro')">Iskra</button>
     </div>
 
     <!-- KONTENERY DOM DLA POSZCZEGÓLNYCH SCEN -->
@@ -409,6 +409,7 @@
             currentScene: null,
             wakeLock: null,
             animationFrameId: null,
+            lastTime: 0,
 
             init: function() {
                 this.resize();
@@ -441,6 +442,9 @@
                 
                 this.currentScene = Scenes[sceneName];
                 
+                // Reset zegara przed wejściem nowej sceny, aby uchronić się przed skokiem Delta Time
+                this.lastTime = 0;
+
                 setTimeout(() => {
                     if(this.currentScene) this.currentScene.start();
                 }, 1000);
@@ -462,14 +466,29 @@
                 setTimeout(() => menu.style.opacity = '1', 50);
             },
 
-            loop: function() {
+            loop: function(timestamp) {
+                if (!timestamp) timestamp = performance.now();
+                if (!this.lastTime) this.lastTime = timestamp;
+                
+                // Wyliczenie Delta Time (dt)
+                const dt = timestamp - this.lastTime;
+                this.lastTime = timestamp;
+
+                // Ujednolicenie prędkości dla urządzeń o różnych częstotliwościach odświeżania 
+                // np. ekran 120Hz vs 60Hz. Wartość 1.0 oznacza stabilne 60 klatek na sekundę.
+                let speedScale = dt / 16.666;
+                // Zapobiegamy wielkim skokom (teleportacji animacji) po zminimalizowaniu karty w przeglądarce
+                if (speedScale > 3) speedScale = 3; 
+                if (speedScale <= 0 || isNaN(speedScale)) speedScale = 1;
+
                 if (this.currentScene && this.currentScene.render) {
-                    this.currentScene.render(this.ctx, this.width, this.height);
+                    // Przekazujemy znormalizowany mnożnik czasu do logiki renderingu poszczególnych scen
+                    this.currentScene.render(this.ctx, this.width, this.height, speedScale);
                 } else {
                     this.ctx.clearRect(0, 0, this.width, this.height);
                 }
                 
-                this.animationFrameId = requestAnimationFrame(() => this.loop());
+                this.animationFrameId = requestAnimationFrame((t) => this.loop(t));
             },
 
             requestWakeLock: async function() {
@@ -559,11 +578,11 @@
                 this.spawnTimeoutId = setTimeout(() => this.spawnParticle(), Math.random() * 900 + 600);
             },
 
-            render: function(ctx, w, h) {
+            render: function(ctx, w, h, speedScale) {
                 ctx.clearRect(0, 0, w, h);
 
                 this.stars.forEach(star => {
-                    star.alpha += star.alphaChange;
+                    star.alpha += star.alphaChange * speedScale;
                     if (star.alpha <= 0.05 || star.alpha >= 0.6) star.alphaChange *= -1;
                     
                     ctx.beginPath();
@@ -583,26 +602,26 @@
                     
                     if (isInsideGlass) {
                         const targetSpeedY = 0.25; 
-                        p.speedY += (targetSpeedY - p.speedY) * 0.06; 
-                        p.x += Math.sin(p.y * 0.08 + p.noiseSeed) * 0.15; 
-                        p.x += (Math.random() - 0.5) * 0.1; 
+                        p.speedY += (targetSpeedY - p.speedY) * 0.06 * speedScale; 
+                        p.x += Math.sin(p.y * 0.08 + p.noiseSeed) * 0.15 * speedScale; 
+                        p.x += (Math.random() - 0.5) * 0.1 * speedScale; 
                         
                         const padding = 15; 
                         if (p.x < jarRect.left + padding) p.x = jarRect.left + padding;
                         if (p.x > jarRect.right - padding) p.x = jarRect.right - padding;
                     }
 
-                    p.y += p.speedY;
+                    p.y += p.speedY * speedScale;
                     
                     const targetStretch = isInsideGlass ? 2.5 : 1; 
-                    p.stretch += (targetStretch - p.stretch) * 0.08; 
+                    p.stretch += (targetStretch - p.stretch) * 0.08 * speedScale; 
 
                     const stretchFactor = Math.sqrt(p.stretch);
                     const rx = p.radius / stretchFactor;
                     const ry = p.radius * stretchFactor;
                     
                     const targetAlpha = isInsideGlass ? 0.4 : 0.8;
-                    p.alpha += (targetAlpha - p.alpha) * 0.08;
+                    p.alpha += (targetAlpha - p.alpha) * 0.08 * speedScale;
 
                     ctx.beginPath();
                     ctx.ellipse(p.x, p.y, rx, ry, 0, 0, Math.PI * 2);
@@ -663,7 +682,7 @@
                 this.drops = [];
             },
 
-            render: function(ctx, w, h) {
+            render: function(ctx, w, h, speedScale) {
                 ctx.fillStyle = "#040814";
                 ctx.fillRect(0, 0, w, h);
 
@@ -697,7 +716,7 @@
                     }
 
                     let oldHeadY = Math.floor(drop.y);
-                    drop.y += drop.speed;
+                    drop.y += drop.speed * speedScale;
                     let newHeadY = Math.floor(drop.y);
 
                     if (newHeadY > oldHeadY) {
@@ -742,7 +761,7 @@
                 this.particles = [];
             },
 
-            render: function(ctx, w, h) {
+            render: function(ctx, w, h, speedScale) {
                 ctx.fillStyle = "#040814";
                 ctx.fillRect(0, 0, w, h);
 
@@ -763,12 +782,12 @@
                 ctx.fill();
                 
                 const tunnelRadius = Math.max(w, h) * 0.25; 
-                this.globalRotation += 0.003; 
+                this.globalRotation += 0.003 * speedScale; 
 
                 for(let i = 0; i < this.particles.length; i++) {
                     let p = this.particles[i];
 
-                    p.z -= p.speedZ;
+                    p.z -= p.speedZ * speedScale;
 
                     if (p.z <= 1) {
                         p.z = this.maxDepth + Math.random() * 500;
@@ -841,8 +860,9 @@
                         x: Math.random() * App.width,
                         y: Math.random() * App.height,
                         radius: Math.random() * 50 + 30, 
-                        vy: (Math.random() * 0.2 + 0.05) * (Math.random() > 0.5 ? 1 : -1), 
-                        vx: (Math.random() - 0.5) * 0.05 
+                        // Dwukrotnie zwiększona prędkość bazowa (aby nadrobić powolność na ekranach 60Hz)
+                        vy: (Math.random() * 0.4 + 0.1) * (Math.random() > 0.5 ? 1 : -1), 
+                        vx: (Math.random() - 0.5) * 0.1 
                     });
                 }
             },
@@ -853,12 +873,12 @@
                 this.blobs = [];
             },
 
-            render: function(ctx, w, h) {
+            render: function(ctx, w, h, speedScale) {
                 ctx.clearRect(0, 0, w, h);
 
                 this.blobs.forEach(b => {
-                    b.y += b.vy;
-                    b.x += b.vx;
+                    b.y += b.vy * speedScale;
+                    b.x += b.vx * speedScale;
 
                     if (b.y < -100 && b.vy < 0) b.vy *= -1; 
                     if (b.y > h + 100 && b.vy > 0) b.vy *= -1; 
@@ -941,7 +961,7 @@
                 });
             },
 
-            render: function(ctx, w, h) {
+            render: function(ctx, w, h, speedScale) {
                 ctx.fillStyle = "#040814";
                 ctx.fillRect(0, 0, w, h);
 
@@ -950,7 +970,7 @@
                 // 1. Rysowanie i aktualizacja efektów Halo (przed cząsteczkami)
                 for (let i = this.surfaceGlows.length - 1; i >= 0; i--) {
                     let g = this.surfaceGlows[i];
-                    g.alpha -= 0.01; // Powolne zanikanie
+                    g.alpha -= 0.01 * speedScale; // Powolne zanikanie z uwzględnieniem Delta Time
                     
                     if (g.alpha <= 0) {
                         this.surfaceGlows.splice(i, 1);
@@ -972,16 +992,16 @@
                     let p = this.particles[i];
                     
                     if (p.state === 0) { // ŁADOWANIE
-                        p.charge++;
-                        p.x += (Math.random() - 0.5) * 0.8 * p.z;
-                        p.y = h - 20 + Math.sin(now * 0.01 + p.swaySeed) * 5;
+                        p.charge += 1 * speedScale;
+                        p.x += (Math.random() - 0.5) * 0.8 * p.z * speedScale;
+                        p.y = h - 20 + Math.sin(now * 0.01 + p.swaySeed) * 5; // Math.sin opiera się na rzeczywistym czasie (Date.now), dlatego zignorowano tu speedScale dla y
                         if (p.charge > p.chargeTime) {
                             p.state = 1;
                             p.charge = 0;
                         }
                     } 
                     else if (p.state === 1) { // LOT W GÓRĘ
-                        p.y -= p.speed * 2.5;
+                        p.y -= p.speed * 2.5 * speedScale;
                         if (p.y < 30) {
                             // UDERZENIE W GÓRĘ: Triggerujemy halo i zmieniamy stan na opadanie
                             this.triggerSurfaceHalo(p.x, p.z, p.hue);
@@ -989,8 +1009,9 @@
                         }
                     } 
                     else if (p.state === 2) { // POWOLNY OPAD
-                        p.y += p.speed * 0.3;
-                        p.x += Math.sin(now * 0.001 + p.swaySeed) * (0.6 * p.z);
+                        p.y += p.speed * 0.3 * speedScale;
+                        // Dla x używamy dodatkowo prędkości wyliczonej na podstawie czasu rzeczywistego
+                        p.x += Math.sin(now * 0.001 + p.swaySeed) * (0.6 * p.z) * speedScale;
                         
                         // ZAMKNIĘCIE PĘTLI: Gdy dotknie dołu, nie znika, tylko siada i się ładuje
                         if (p.y > h - 25) {
